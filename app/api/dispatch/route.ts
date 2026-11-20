@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
-  if (rateLimited(clientIp(req))) return NextResponse.json({ error: "Too many requests. Wait a minute and try again." }, { status: 429 });
+  if (rateLimited("dispatch", clientIp(req))) return NextResponse.json({ error: "Too many requests. Wait a minute and try again." }, { status: 429 });
   const parsed = DispatchRequest.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   const body = parsed.data;

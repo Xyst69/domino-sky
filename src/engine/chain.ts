@@ -22,7 +22,7 @@ export function causeChain(net: Network, r: SimResult, closures: Closure[], flig
 
   while (id && !seen.has(id)) {
     seen.add(id);
-    const s = r.flights[id];
+    const s: SimResult["flights"][string] = r.flights[id];
     const f = byId.get(id)!;
     const c = s.cause;
     if (!c) {
@@ -31,14 +31,14 @@ export function causeChain(net: Network, r: SimResult, closures: Closure[], flig
     }
     switch (c.kind) {
       case "closure_departure": {
-        const cl = closures.find((x) => x.airport === c.airport);
+        const cl = c.closure !== undefined ? closures[c.closure] : undefined;
         steps.push({ flight: id, link: "aircraft", text: `${id} held at ${airportName(c.airport!)} until it reopened, leaving ${fmt(s.dep)} (+${c.minutes} min).` });
         if (cl) steps.push({ link: "storm", text: `${airportName(cl.airport)} (${cl.airport}) closed ${fmt(cl.start)}–${fmt(cl.end)}.` });
         id = undefined;
         break;
       }
       case "closure_arrival": {
-        const cl = closures.find((x) => x.airport === c.airport);
+        const cl = c.closure !== undefined ? closures[c.closure] : undefined;
         steps.push({ flight: id, link: "aircraft", text: `${id} waited at ${airportName(f.origin)} so it would not arrive at closed ${airportName(c.airport!)}; left ${fmt(s.dep)} (+${c.minutes} min).` });
         if (cl) steps.push({ link: "storm", text: `${airportName(cl.airport)} (${cl.airport}) closed ${fmt(cl.start)}–${fmt(cl.end)}.` });
         id = undefined;
@@ -60,10 +60,10 @@ export function causeChain(net: Network, r: SimResult, closures: Closure[], flig
         steps.push({
           flight: id,
           link: "crew",
-          text: `${id} cancelled: crew ${s.crew} would reach ${s.dutyAtArrival} of ${s.dutyAtArrival! - c.minutes} legal duty minutes on landing at ${fmt(s.arr)}.`,
+          text: `${id} cancelled: crew ${s.crew} would reach ${s.dutyAtArrival} of ${s.dutyAtArrival! - c.minutes} legal duty minutes if it landed at ${fmt(s.arr)}.`,
         });
         if (c.airport) {
-          const cl = closures.find((x) => x.airport === c.airport);
+          const cl = c.closure !== undefined ? closures[c.closure] : undefined;
           if (cl) steps.push({ link: "storm", text: `${airportName(cl.airport)} (${cl.airport}) closed ${fmt(cl.start)}–${fmt(cl.end)}.` });
           id = undefined;
         } else id = c.sourceFlight;

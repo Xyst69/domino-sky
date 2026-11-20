@@ -80,8 +80,8 @@ line by line.
 4. **Grounded AI.** After an unrehearsed storm (for example 75 minutes at HYD) the AI must cite
    the exact flights, aircraft and passenger counts affected by that storm. This holds by
    construction: the server re-runs the engine for the current scenario, the AI may only use
-   the entity IDs and fact keys of that run, and the app fills in every number. Pre-generated
-   answers are used only for exact preset matches; any other scenario goes to the live model.
+   the entity IDs and fact keys of that run, and the app fills in every number. Every request,
+   preset or not, goes to the live model; there is no answer cache (see review round 1, R1-22).
 
 ### What the AI evaluator will read
 
@@ -211,8 +211,8 @@ A passenger counted as stranded is not also counted as delayed. Each case gets a
   estimate are deferred.
 - **Cancel an out-and-back pair.** Only legs that form X→Y then Y→X on the same aircraft
   qualify (for example DS0502/0503, DS0701/0702, DS0703/0704, DS1003/1004, DS1201/1202,
-  DS1203/1204, DS1503/1504). VT-DS03, VT-DS05, VT-DS11 and VT-DS15 have no such pair, so this
-  action cannot help in the flagship scenario. Cancelling a pair also breaks the connections it
+  DS1203/1204, DS1503/1504). VT-DS03 and VT-DS11 have no such pair, so this action cannot help
+  in the flagship scenario. Cancelling a pair also breaks the connections it
   carries (cancelling DS0703/0704 breaks CX07, CX11 and CX17); the score includes them.
 - **Hold a departure to protect a connection** (up to a set number of minutes). Cheap to
   build, and it creates the kind of trade-off the AI is there to weigh: delay 170 people to
@@ -323,9 +323,8 @@ terms appear in tooltips.
   design does not depend on the provider: the engine, the typed explanation format and the
   validator are the same for any model.
 - **Speed for the demo.** Engine results appear instantly; the AI's explanation arrives
-  afterwards. AI answers for the preset scenarios are generated ahead of time, validated by the
-  same checker, and stored with the app, keyed by a hash of (dataset, rules version, scenario).
-  Judges get instant answers on the presets and live answers on anything else.
+  afterwards. A pre-generated answer cache was planned but not built (review round 1, R1-22);
+  instead the author runs each preset once against the deployed site before the demo.
 - **Abuse and cost.** Per-IP rate limit on the route, a spend cap on the API key, and an
   `AI_ENABLED` switch that forces offline mode without a redeploy.
 - **Version skew.** Requests carry `ENGINE_VERSION` and the scenario hash; the response
@@ -454,15 +453,15 @@ Functionality (20), so it comes first and is tested hardest.
    lit on both views.
 6. **AI.** Gemini route with the crisis compiler and the dispatcher (`simulate` tool),
    validator with one repair attempt, one-click Apply, rate limit, version and hash checks,
-   pre-generated preset answers, rule-based fallbacks for both AI jobs.
+   rule-based fallbacks for both AI jobs.
 7. **Polish and proof.** Cascade waves, Assumptions panel, fonts and patterns, accessibility
    and zero-console-error pass, AntiSlopUI pre-delivery audit, README for the AI evaluator,
    and a rehearsal of the four live tests.
 
 ### Open questions for the author
 
-1. **API key — resolved.** The author has a Gemini API key; the dispatcher uses Gemini. The
-   same key generates the preset answers ahead of time. Check the key's plan: on Google's
+1. **API key — resolved.** The author has a Gemini API key; the dispatcher uses Gemini.
+   Check the key's plan: on Google's
    free tier, prompts may be used to improve Google's products and rate limits are low, which
    matters if judges click quickly. The dataset is organiser-provided and not sensitive.
 2. **Hold-for-connection action — resolved.** Kept in version 1: the judges' live recovery

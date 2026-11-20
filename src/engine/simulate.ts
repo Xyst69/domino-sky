@@ -14,7 +14,8 @@ import type {
   SimResult,
 } from "./types";
 
-export const ENGINE_VERSION = "1.0.0";
+/** Bump whenever a rule changes, so open pages from an older deployment get a clear "reload" message. */
+export const ENGINE_VERSION = "1.1.0";
 
 /** Standby crew that comes with a spare aircraft: reports 45 min before its first departure. */
 export const STANDBY_REPORT_MIN = 45;
@@ -28,9 +29,9 @@ interface Rotation {
   ready: Minutes; // earliest time the aircraft can depart its first leg
 }
 
-function closureAt(closures: Closure[], airport: string, t: Minutes): Closure | undefined {
+function closureAt(closures: Closure[], airport: string, t: Minutes): number {
   // Half-open window [start, end): a departure exactly at reopening is allowed.
-  return closures.find((c) => c.airport === airport && c.start <= t && t < c.end);
+  return closures.findIndex((c) => c.airport === airport && c.start <= t && t < c.end);
 }
 
 /** Build the aircraft rotations after applying swap actions. */
@@ -97,7 +98,7 @@ export function simulate(net: Network, scenario: Scenario): SimResult {
 
   assignWaves(net, states);
   const connections = evaluateConnections(net, states);
-  const metrics = computeMetrics(net, states, connections, actions, rotations);
+  const metrics = computeMetrics(net, states, connections, actions);
   const maxWave = Math.max(-1, ...Object.values(states).map((s) => s.wave));
   return { flights: states, connections, metrics, maxWave, capacityOk: checkCapacity(net, states) };
 }
@@ -192,25 +193,27 @@ function runRotations(
       // Closures: hold departures from a closed airport; hold at origin rather than arrive into one.
       for (let i = 0; i < 10; i++) {
         let changed = false;
-        const atOrigin = closureAt(closures, leg.origin, dep);
-        if (atOrigin) {
-          dep = atOrigin.end;
-          cause = { kind: "closure_departure", minutes: dep - leg.dep, airport: leg.origin };
+        const o = closureAt(closures, leg.origin, dep);
+        if (o >= 0) {
+          dep = closures[o].end;
+          cause = { kind: "closure_departure", minutes: dep - leg.dep, airport: leg.origin, closure: o };
           changed = true;
         }
         const arrival = dep + leg.block;
-        const atDest = closureAt(closures, leg.destination, arrival);
+        const d = closureAt(closures, leg.destination, arrival);
         // A flight already airborne when the closure starts is allowed to land.
-        if (atDest && dep >= atDest.start) {
-          dep = atDest.end - leg.block;
-          cause = { kind: "closure_arrival", minutes: dep - leg.dep, airport: leg.destination };
+        if (d >= 0 && dep >= closures[d].start) {
+          dep = closures[d].end - leg.block;
+          cause = { kind: "closure_arrival", minutes: dep - leg.dep, airport: leg.destination, closure: d };
           changed = true;
         }
         if (!changed) break;
       }
 
       const arr = dep + leg.block;
-      if (dutyStart === undefined) dutyStart = dep - STANDBY_REPORT_MIN;
+      // A standby crew reports a fixed time before the scheduled departure of its first flight,
+      // just as regular crews keep their published report time when flights run late.
+      if (dutyStart === undefined) dutyStart = leg.dep - STANDBY_REPORT_MIN;
       const duty = arr - dutyStart;
 
       if (duty > maxDuty) {
@@ -222,7 +225,14 @@ function runRotations(
           status: "cancelled",
           absorbed,
           dutyAtArrival: duty,
-          cause: { kind: "crew_duty", minutes: duty - maxDuty, detail: crewId, sourceFlight: cause?.sourceFlight, airport: cause?.airport },
+          cause: {
+            kind: "crew_duty",
+            minutes: duty - maxDuty,
+            detail: crewId,
+            sourceFlight: cause?.sourceFlight,
+            airport: cause?.airport,
+            closure: cause?.closure,
+          },
         };
         continue;
       }
@@ -270,8 +280,9 @@ function assignWaves(net: Network, states: Record<string, FlightState>): void {
         break;
       }
       case "crew_duty":
-        if (c.airport) w = 1;
-        else w = c.sourceFlight ? waveOf(c.sourceFlight, guard + 1) + 2 : 0;
+        // Cancelled in the same step as the delay that broke the crew's limit.
+        if (c.airport) w = 0;
+        else w = c.sourceFlight ? waveOf(c.sourceFlight, guard + 1) + 1 : 0;
         break;
       case "chain":
         w = c.sourceFlight ? waveOf(c.sourceFlight, guard + 1) + 1 : 0;
@@ -309,7 +320,6 @@ function computeMetrics(
   states: Record<string, FlightState>,
   conns: Record<string, ConnectionState>,
   actions: Action[],
-  rotations: Rotation[],
 ): Metrics {
   const byId = new Map(net.flights.map((f) => [f.id, f]));
   let late = 0;
@@ -336,43 +346,69 @@ function computeMetrics(
     }
   }
 
-  // Connecting passengers are already inside both flights' pax counts.
+  // Connecting passengers are already inside both flights' pax counts. Count each of them once,
+  // by what happens to them in the end: stranded passengers are not also delayed, and a passenger
+  // who completes a connection is judged on the arrival of their final flight only.
   let bothCancelled = 0;
   let brokenOperated = 0;
-  let brokenOnLateInbound = 0;
   let broken = 0;
   for (const c of net.connections) {
     const st = conns[c.id];
+    const a = states[c.from];
+    const b = states[c.to];
+    const aLate = a.status === "late";
+    const bLate = b.status === "late";
+    const drop = (s: FlightState) => {
+      delayedPax -= c.passengers;
+      paxDelay -= c.passengers * s.delay;
+    };
     if (!st.made) broken++;
-    if (st.reason === "both_cancelled") bothCancelled += c.passengers;
-    if (st.reason === "too_short") {
-      brokenOperated += c.passengers;
-      if (states[c.from].status === "late") brokenOnLateInbound += c.passengers;
+    switch (st.reason) {
+      case "ok": // reached the onward flight: only the final arrival counts
+        if (aLate) drop(a);
+        break;
+      case "too_short": // stranded at the connecting airport
+        brokenOperated += c.passengers;
+        if (aLate) drop(a);
+        if (bLate) drop(b);
+        break;
+      case "inbound_cancelled": // stranded at origin; not on the onward flight
+        if (bLate) drop(b);
+        break;
+      case "onward_cancelled": // stranded at the connecting airport
+        if (aLate) drop(a);
+        break;
+      case "both_cancelled":
+        bothCancelled += c.passengers;
+        break;
     }
   }
   const stranded = strandedOnCancelled - bothCancelled + brokenOperated;
 
-  // Aircraft not where the plan expected them at the end of the day.
-  const plannedEnd = new Map<string, string>();
-  for (const [tail, legs] of groupByTail(net)) plannedEnd.set(tail, legs[legs.length - 1].destination);
-  let outOfPosition = 0;
+  // Aircraft not at their planned overnight airport: each aircraft ends where its last flown leg landed.
   const usedSpares = new Set(actions.filter((a) => a.kind === "swap").map((a) => (a as { spare: string }).spare));
-  for (const rot of rotations) {
-    if (rot.legs.length === 0 && !plannedEnd.has(rot.tail)) continue;
-    let station = rot.legs.length ? rot.legs[0].origin : "";
-    for (const leg of rot.legs) if (states[leg.id].status !== "cancelled") station = leg.destination;
-    const spare = net.spares.find((s) => s.tail === rot.tail);
-    const expected = spare ? spare.base : plannedEnd.get(rot.tail);
-    if (rot.legs.length && station !== expected) outOfPosition++;
+  const lastLeg = new Map<string, { at: Minutes; airport: string }>();
+  for (const s of Object.values(states)) {
+    if (s.status === "cancelled") continue;
+    const cur = lastLeg.get(s.tail);
+    if (!cur || s.arr > cur.at) lastLeg.set(s.tail, { at: s.arr, airport: byId.get(s.id)!.destination });
   }
-
+  let outOfPosition = 0;
+  for (const [tail, legs] of groupByTail(net)) {
+    const end = lastLeg.get(tail)?.airport ?? legs[0].origin;
+    if (end !== legs[legs.length - 1].destination) outOfPosition++;
+  }
+  for (const s of net.spares) {
+    const end = lastLeg.get(s.tail)?.airport ?? s.base;
+    if (end !== s.base) outOfPosition++;
+  }
   return {
     lateFlights: late,
     cancelledFlights: cancelled,
     totalDelayMinutes: totalDelay,
     paxDelayMinutes: paxDelay,
     strandedPax: stranded,
-    delayedPax: delayedPax - brokenOnLateInbound,
+    delayedPax,
     brokenConnections: broken,
     crewBreaches: breachedCrews.size,
     sparesUsed: usedSpares.size,

@@ -87,6 +87,7 @@ export interface Cause {
   minutes: Minutes; // minutes this cause added (0 for cancellations)
   sourceFlight?: string; // previous flight in the chain, when relevant
   airport?: string; // closed airport, when relevant
+  closure?: number; // index of the closure in the scenario, when relevant
   detail?: string; // e.g. crew id, connection id
 }
 

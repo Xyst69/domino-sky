@@ -85,22 +85,64 @@ describe("number guarantee", () => {
   });
   const bad: [string, Segment[]][] = [
     ["digits", [{ k: "text", text: "Saves 167 passengers" }]],
-    ["number words", [{ k: "text", text: "saves forty passengers" }]],
-    ["'half'", [{ k: "text", text: "cuts stranding in half" }]],
+    ["number words", [{ k: "text", text: "rescues forty passengers" }]],
+    ["'half'", [{ k: "text", text: "strands half the passengers" }]],
     ["Devanagari digits", [{ k: "text", text: "यात्री १६७" }]],
+    ["Gujarati digits", [{ k: "text", text: "યાત્રી ૧૬૭" }]],
+    ["Tamil digits", [{ k: "text", text: "பயணிகள் ௧௬௭" }]],
+    ["superscripts and fractions", [{ k: "text", text: "about ½ of them" }]],
+    ["Roman numerals", [{ k: "text", text: "Option XII is best" }]],
+    ["ordinals", [{ k: "text", text: "the third option" }]],
+    ["'both'", [{ k: "text", text: "both crews time out" }]],
+    ["'million'", [{ k: "text", text: "a million minutes" }]],
+    ["an unbacked comparison", [{ k: "text", text: "this strands fewer people" }]],
     ["unknown fact", [{ k: "fact", key: "plan.happiness" }]],
     ["unknown flight", [{ k: "entity", type: "flight", id: "DS9999" }]],
     ["false comparison", [{ k: "compare", left: "closure.stranded", op: "lt", right: "plan.stranded" }]],
+    ["comparison of different units", [{ k: "compare", left: "closure.stranded", op: "gt", right: "DS0304.schedDep" }]],
+    ["too many segments", Array.from({ length: 60 }, () => ({ k: "text", text: "x" }) as Segment)],
   ];
   for (const [name, segs] of bad) it(`rejects ${name}`, () => expect(validateSegments(segs, facts, ents).ok).toBe(false));
-  it("accepts IDs as entities and true comparisons", () => {
+  it("accepts IDs as entities, the pronoun I, and backed comparisons", () => {
     const segs: Segment[] = [
+      { k: "text", text: "I recommend this: " },
       { k: "entity", type: "flight", id: "DS0304" },
       { k: "text", text: " is saved by " },
       { k: "entity", type: "aircraft", id: "VT-DS18" },
+      { k: "text", text: ", which strands fewer people" },
       { k: "compare", left: "plan.stranded", op: "lt", right: "closure.stranded" },
     ];
     expect(validateSegments(segs, facts, ents)).toEqual({ ok: true });
+  });
+  it("does not offer departure facts for a cancelled flight", () => {
+    expect(facts["closure.DS0304.dep"]).toBeUndefined();
+    expect(facts["closure.DS0304.duty"].value).toBe(605);
+  });
+});
+
+describe("passenger counting", () => {
+  it("does not count stranded connecting passengers again as delayed (Hyderabad preset)", () => {
+    const p = PRESETS.find((x) => x.id === "hyderabad")!;
+    const r = simulate(NETWORK, { closures: p.closures, actions: [] });
+    // CX17's 23 passengers were on cancelled DS0704: stranded, so not among DS0803's delayed passengers.
+    const lateFlights = Object.values(r.flights).filter((s) => s.status === "late");
+    const naive = lateFlights.reduce((a, s) => a + NETWORK.flights.find((f) => f.id === s.id)!.pax, 0);
+    expect(r.connections.CX17.reason).toBe("inbound_cancelled");
+    expect(r.metrics.delayedPax).toBeLessThan(naive);
+    expect(r.metrics.delayedPax + r.metrics.strandedPax).toBeLessThanOrEqual(NETWORK.flights.reduce((a, f) => a + f.pax, 0));
+  });
+});
+
+describe("two closures at one airport", () => {
+  it("the cause chain names the closure that actually held the flight", () => {
+    const closures = [
+      { airport: "DEL", start: 360, end: 450 },
+      { airport: "DEL", start: 900, end: 990 },
+    ];
+    const r = simulate(NETWORK, { closures, actions: [] });
+    const steps = causeChain(NETWORK, r, closures, "DS0105");
+    expect(steps[0].link).toBe("storm");
+    expect(steps[0].text).toContain("15:00–16:30");
   });
 });
 

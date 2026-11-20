@@ -20,11 +20,11 @@ export function fmt(t: Minutes): string {
   return day > 0 ? `${s} +${day}d` : s;
 }
 
-/** 95 -> "1h 35m", 20 -> "20m" */
+/** 95 -> "1 h 35 min", 20 -> "20 min" */
 export function fmtDuration(mins: Minutes): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h} h`;
+  return `${h} h ${m} min`;
 }

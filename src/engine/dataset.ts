@@ -1,5 +1,5 @@
 import { z } from "zod";
-import raw from "../../data/dataset.json";
+import raw from "../../datsett.json"; // the organisers' dataset, unchanged
 import { parseHHMM } from "./time";
 import type { Network } from "./types";
 

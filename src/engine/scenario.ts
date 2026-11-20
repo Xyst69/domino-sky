@@ -18,9 +18,9 @@ export function normaliseClosures(closures: Closure[]): Closure[] {
     .sort((a, b) => (a.airport === b.airport ? a.start - b.start : a.airport < b.airport ? -1 : 1));
 }
 
-/** Identifies one dispatcher question: engine version + storms + priority. */
-export function scenarioHash(closures: Closure[], priority: Priority): string {
-  return fnv1a(JSON.stringify({ v: ENGINE_VERSION, c: normaliseClosures(closures), p: priority }));
+/** Identifies one dispatcher question: engine version + storms + priority + operator note. */
+export function scenarioHash(closures: Closure[], priority: Priority, note = ""): string {
+  return fnv1a(JSON.stringify({ v: ENGINE_VERSION, c: normaliseClosures(closures), p: priority, n: note.trim() }));
 }
 
 export interface Preset {
@@ -39,7 +39,8 @@ export const PRESETS: Preset[] = [
   {
     id: "crew-clock",
     name: "Mumbai afternoon storm",
-    blurb: "A short closure in Mumbai cancels the evening Delhi–Kolkata flight five hours later, because its crew runs out of legal hours.",
+    blurb:
+      "A short closure in Mumbai cancels the evening Delhi–Kolkata flight hours later, because its crew runs out of legal hours. The dataset has no Bengaluru–Kolkata flight, so DS0304 Delhi–Kolkata plays that role in the organisers' example.",
     closures: [{ airport: "BOM", start: h("15:00"), end: h("16:30") }],
   },
   {
@@ -57,7 +58,7 @@ export const PRESETS: Preset[] = [
   {
     id: "two-hubs",
     name: "Delhi fog, then Mumbai rain",
-    blurb: "Two hubs close on the same morning. Delays from both meet at Mumbai and break a connection.",
+    blurb: "Two hubs close on the same morning. The Delhi fog breaks a connection at Mumbai, and the Mumbai rain then holds the morning departures there.",
     closures: [
       { airport: "DEL", start: h("06:00"), end: h("07:30") },
       { airport: "BOM", start: h("08:00"), end: h("09:00") },

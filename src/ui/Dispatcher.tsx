@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   NETWORK,
   ENGINE_VERSION,
@@ -65,7 +65,7 @@ function referencedKeys(segs: Segment[]): string[] {
 
 const samePlan = (a: string[], b: string[]) => [...a].sort().join("&") === [...b].sort().join("&");
 
-export function Dispatcher({ closures, base, live, search, applied, priority, onPriority, onApply }: Props) {
+export const Dispatcher = memo(function Dispatcher({ closures, base, live, search, applied, priority, onPriority, onApply }: Props) {
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<DispatchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -136,14 +136,14 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
   if (!closures.length)
     return (
       <section className="section" aria-labelledby="disp-h">
-        <h2 id="disp-h">Dispatcher</h2>
+        <h2 id="disp-h" tabIndex={-1}>Dispatcher</h2>
         <p className="hint">Close an airport first. The dispatcher then proposes how to recover.</p>
       </section>
     );
 
   return (
     <section className="section" aria-labelledby="disp-h">
-      <h2 id="disp-h">Dispatcher</h2>
+      <h2 id="disp-h" tabIndex={-1}>Dispatcher</h2>
       {applied.length ? (
         <div className="applied-bar" role="status">
           <span>
@@ -200,7 +200,7 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
 
           <div className="plans">
             <div className="plan-card">
-              <h4>Engine's default</h4>
+              <h3>Engine's default</h3>
               {defaultPlan && defaultPlan.actions.length ? (
                 <ul>{defaultPlan.actions.map((a) => <li key={actionId(a)}>{describe(a)}</li>)}</ul>
               ) : (
@@ -209,7 +209,7 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
               {defaultPlan ? <div className="nums">{summary(defaultPlan.metrics)}</div> : null}
             </div>
             <div className="plan-card chosen">
-              <h4>Dispatcher's choice</h4>
+              <h3>Dispatcher's choice</h3>
               {planActions.length ? <ul>{planActions.map((a) => <li key={actionId(a)}>{describe(a)}</li>)}</ul> : <p style={{ margin: "0 0 6px" }}>Do nothing</p>}
               <div className="nums">{verification && summary(verification.metrics)}</div>
             </div>
@@ -282,4 +282,4 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
       )}
     </section>
   );
-}
+});

@@ -1,4 +1,5 @@
 "use client";
+import { useId } from "react";
 import type { Metrics, SimResult } from "@/engine";
 import { fmtDuration } from "@/engine";
 
@@ -15,10 +16,11 @@ const ROWS: [keyof Metrics, string, (n: number) => string][] = [
 ];
 
 export function ImpactPanel({ base, live, applied, hasStorm }: { base: SimResult; live: SimResult; applied: boolean; hasStorm: boolean }) {
+  const headingId = useId();
   const m = live.metrics;
   return (
-    <section className="section" aria-labelledby="impact-h">
-      <h2 id="impact-h">Impact</h2>
+    <section className="section" aria-labelledby={headingId}>
+      <h2 id={headingId}>Impact</h2>
       {!hasStorm ? (
         <p className="hint">With no storm, every flight runs to schedule and all 21 connections are made.</p>
       ) : (
@@ -32,7 +34,7 @@ export function ImpactPanel({ base, live, applied, hasStorm }: { base: SimResult
               </>
             ) : null}
           </p>
-          <table className="compare">
+          <table className="compare" aria-labelledby={headingId}>
             <thead>
               <tr>
                 <th scope="col">Measure</th>
@@ -47,7 +49,7 @@ export function ImpactPanel({ base, live, applied, hasStorm }: { base: SimResult
                 const good = k === "absorbedMinutes" ? d > 0 : d < 0;
                 return (
                   <tr key={k}>
-                    <td>{label}</td>
+                    <th scope="row">{label}</th>
                     <td>{f(base.metrics[k])}</td>
                     {applied ? <td>{f(live.metrics[k])}</td> : null}
                     {applied ? (

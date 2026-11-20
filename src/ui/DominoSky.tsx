@@ -72,7 +72,7 @@ export function DominoSky() {
     [state],
   );
   const setClosures = (c: Closure[], presetId: string | null = null) => commit({ closures: c, applied: [], presetId });
-  const applyActions = (actions: Action[]) => commit({ ...state, applied: actions });
+  const applyActions = useCallback((actions: Action[]) => commit({ ...state, applied: actions }), [commit, state]);
   const undo = () => {
     if (!history.length) return;
     setState(history[history.length - 1]);
@@ -135,15 +135,16 @@ export function DominoSky() {
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#disp-h">Skip to dispatcher</a>
       <header className="topbar">
-        <div className="brand">
+        <h1 className="brand">
           <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
             <rect x="2" y="5" width="6" height="14" rx="1.5" fill="#334155" />
             <rect x="9" y="5" width="6" height="14" rx="1.5" fill="#334155" transform="rotate(-14 12 19)" opacity="0.75" />
             <rect x="15" y="9" width="6" height="12" rx="1.5" fill="#B42318" transform="rotate(-48 18 21)" />
           </svg>
           Domino Sky
-        </div>
+        </h1>
         <Headline closures={closures} result={live} applied={applied.length > 0} />
         <div className="topbar-actions">
           <button className="btn btn-small" onClick={undo} disabled={!history.length} title="Undo (Ctrl+Z)">

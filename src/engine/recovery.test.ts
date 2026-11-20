@@ -53,6 +53,19 @@ describe("presets", () => {
 });
 
 describe("conflict checker", () => {
+  it("returns the same standalone move metrics as an independent run", () => {
+    for (const { closures } of PRESETS) {
+      const { singles, candidates } = searchRecovery(NETWORK, closures);
+      expect(singles.map(s => s.action)).toEqual(candidates);
+      for (const { action, metrics } of singles) {
+        expect(metrics).toEqual(simulate(NETWORK, { closures, actions: [action] }).metrics);
+      }
+    }
+  });
+  it("detects congestion on a network where hourly capacity can bind", () => {
+    const airports = NETWORK.airports.map(a => a.id === "DEL" ? { ...a, capacityPerHour: 1 } : a);
+    expect(simulate({ ...NETWORK, airports }, { closures: [], actions: [] }).capacityOk).toBe(false);
+  });
   it("rejects a spare flying from another airport", () => {
     const r = checkPlan(NETWORK, [{ kind: "swap", spare: "VT-DS17", flight: "DS0304" }]);
     expect(r.ok).toBe(false);

@@ -214,7 +214,8 @@ export function MapView({ closures, result, clock, selected, pathFlights, onSele
               key={a.id}
               className={`apt ${a.tier !== "spoke" ? "hub" : ""}`}
               role="button"
-              tabIndex={0}
+              tabIndex={closed || closures.length >= 4 ? -1 : 0}
+              aria-disabled={closed || closures.length >= 4}
               aria-label={closed ? `${a.city} (${a.id}), closed` : `Close ${a.city} (${a.id}) for ninety minutes`}
               onClick={() => addStormAt(a.id)}
               onKeyDown={(e) => {

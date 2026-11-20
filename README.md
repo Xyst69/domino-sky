@@ -11,13 +11,24 @@ construction:** the AI never writes a digit. It returns typed segments that refe
 by key; the deterministic engine supplies every number, and the browser re-computes them
 independently.
 
+## Airline operations control
+
+The chosen vertical is **Domino Sky — Flight Disruption Cascade & Recovery Simulator**.
+The operator is an airline dispatcher deciding which passengers, crews and aircraft to protect during a closure.
+For a short walkthrough, choose **Mumbai afternoon storm**, inspect **DS0304**, then apply the Delhi spare.
+Stranded passengers fall from **167 to 0**. **Undo** restores the disrupted schedule.
+
+[Open the simulator](https://domino-sky-eight.vercel.app/)
+
 ## Run it
 
 ```bash
-npm install
+npm ci
 cp .env.example .env.local   # add GEMINI_API_KEY (optional — the app works offline without it)
 npm run dev                  # http://localhost:3000
-npm test                     # 79 tests: engine, recovery, number check, parser, scripted-AI dispatcher
+npm test                     # simulation, recovery, explanations, AI and HTTP routes
+npm run typecheck
+npm run bench                # recovery search across five scenarios
 npm run build
 ```
 
@@ -37,7 +48,8 @@ on models that think by default.
 | --- | --- |
 | `datsett.json` | The organisers' dataset, unchanged. Validated on load (legs join up, block times match). |
 | `src/engine/` | The deterministic engine. Pure TypeScript: no React, no `Date`, no randomness. Runs in the browser and on the server. |
-| `src/engine/simulate.ts` | Closure rules, aircraft rotation with buffer absorption, crew duty, passenger counting, cause records. |
+| `src/engine/simulate.ts` | Closure rules, aircraft rotation with buffer absorption, crew duty and cause records. |
+| `src/engine/metrics.ts` | Connection outcomes, passenger accounting, aircraft positioning and capacity checks. |
 | `src/engine/recovery.ts` | Recovery actions as patches with stable IDs, conflict checker, exhaustive search, Pareto set, priority orders. |
 | `src/engine/explain.ts` | The fact registry (every number the AI may cite), typed explanation segments and the validator. |
 | `src/engine/chain.ts` | "Why is this flight late?" — walks recorded causes back to the storm. |
@@ -65,8 +77,18 @@ All times are whole minutes since 00:00 IST.
   167 including CX19's 14; counting them again would exceed 180 seats). Stranded = passengers on
   cancelled flights − connecting passengers counted on two cancelled flights + connecting
   passengers who miss a connection between two flights that both operated.
-- **Airport capacity** never binds: at every airport the whole day's movements are fewer than
-  one hour's capacity. The engine still checks it in every scenario.
+- **Airport capacity** never binds on the supplied timetable. The engine checks each airport's
+  total scheduled movements against its hourly limit once per search. If the daily total could
+  exceed that limit, it checks actual movements in rolling 60-minute windows for each plan.
+
+### Recovery search performance
+
+Each search indexes the timetable once. It retains the best trade-offs as it evaluates plans,
+discards dominated candidates immediately and reuses single-action metrics for the recovery controls.
+The benchmark runs all four presets plus simultaneous DEL, BOM, HYD and BLR closures from 09:00 to
+13:30. On the development machine with Node 24.19, one batch took **66.5 ms before** and
+**28.4 ms after** the change (median of ten measured batches after two warmups).
+The benchmark command above exercises the same workload. Timings vary by machine.
 
 ## Recovery and the AI's role
 
@@ -134,7 +156,9 @@ Chosen by scanning every airport and start time for real trade-offs; numbers are
   tested with a scripted client (valid plan, repair, double failure, unknown actions, budget,
   timeout, service error), but it has not been run against the live API in this repository (the
   tests run without a key). See "Before a demo" above.
-- The per-route, per-IP rate limit is in memory, per server instance.
+- Each AI route accepts up to 8 KiB of JSON and applies a rolling limit of 30 requests per
+  client per minute within one server instance. The deployment proxy must set the forwarded
+  client address. Limits reset when the instance restarts.
 - On phones the impact table and scenarios sit below the board (accepted for this version; the
   demo surface is a laptop).
 

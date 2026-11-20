@@ -1,13 +1,12 @@
-import { groupByTail } from "./dataset";
+import { indexSchedule, type ScheduleIndex } from "./dataset";
+import { evaluateConnections, computeMetrics, checkCapacity } from "./metrics";
 import type {
   Action,
   Cause,
   Closure,
-  ConnectionState,
   Crew,
   Flight,
   FlightState,
-  Metrics,
   Minutes,
   Network,
   Scenario,
@@ -35,16 +34,15 @@ function closureAt(closures: Closure[], airport: string, t: Minutes): number {
 }
 
 /** Build the aircraft rotations after applying swap actions. */
-function buildRotations(net: Network, actions: Action[]): Rotation[] {
-  const byTail = groupByTail(net);
-  const crewByTail = new Map(net.crews.map((c) => [c.tail, c]));
+function buildRotations(net: Network, actions: Action[], index: ScheduleIndex): Rotation[] {
+  const { byTail, crewByTail } = index;
   const rotations: Rotation[] = [];
   const moved = new Map<string, Flight[]>(); // spare tail -> legs it takes over
   const cutAt = new Map<string, number>(); // tail -> index where its legs move to a spare
 
   for (const a of actions) {
     if (a.kind !== "swap") continue;
-    const f = net.flights.find((x) => x.id === a.flight);
+    const f = index.flights.get(a.flight);
     if (!f) throw new Error(`Unknown flight ${a.flight}`);
     const legs = byTail.get(f.tail)!;
     const idx = legs.findIndex((x) => x.id === f.id);
@@ -72,9 +70,9 @@ function buildRotations(net: Network, actions: Action[]): Rotation[] {
  * Run the day. Deterministic: the same network and scenario always give the same result.
  * Flights never wait for connecting passengers unless a "hold" action says so.
  */
-export function simulate(net: Network, scenario: Scenario): SimResult {
+export function simulate(net: Network, scenario: Scenario, index = indexSchedule(net)): SimResult {
   const { closures, actions } = scenario;
-  const rotations = buildRotations(net, actions);
+  const rotations = buildRotations(net, actions, index);
   const dispatcherCancelled = new Set<string>();
   for (const a of actions) if (a.kind === "cancelPair") {
     dispatcherCancelled.add(a.out);
@@ -82,25 +80,26 @@ export function simulate(net: Network, scenario: Scenario): SimResult {
   }
   const holds = new Map<string, string[]>(); // onward flight -> connection ids held for it
   for (const a of actions) if (a.kind === "hold") {
-    const c = net.connections.find((x) => x.id === a.connection);
+    const c = index.connections.get(a.connection);
     if (!c) throw new Error(`Unknown connection ${a.connection}`);
     holds.set(c.to, [...(holds.get(c.to) ?? []), c.id]);
   }
 
+  const feeders = actions.flatMap(a => a.kind === "hold" ? [index.connections.get(a.connection)!.from] : []);
   // Holds create the only links between rotations, so iterate to a fixed point.
   let states: Record<string, FlightState> = {};
   for (let pass = 0; pass < 6; pass++) {
-    const next = runRotations(net, rotations, closures, dispatcherCancelled, holds, states);
-    const stable = pass > 0 && JSON.stringify(next) === JSON.stringify(states);
+    const next = runRotations(net, rotations, closures, dispatcherCancelled, holds, states, index);
+    const stable = pass > 0 && feeders.every(id => next[id].arr === states[id].arr && next[id].status === states[id].status);
     states = next;
     if (stable || holds.size === 0) break;
   }
 
-  assignWaves(net, states);
+  assignWaves(index, states);
   const connections = evaluateConnections(net, states);
-  const metrics = computeMetrics(net, states, connections, actions);
+  const metrics = computeMetrics(net, states, connections, actions, index);
   const maxWave = Math.max(-1, ...Object.values(states).map((s) => s.wave));
-  return { flights: states, connections, metrics, maxWave, capacityOk: checkCapacity(net, states) };
+  return { flights: states, connections, metrics, maxWave, capacityOk: index.capacityCannotBind || checkCapacity(net, states, index) };
 }
 
 function runRotations(
@@ -110,9 +109,10 @@ function runRotations(
   dispatcherCancelled: Set<string>,
   holds: Map<string, string[]>,
   previous: Record<string, FlightState>,
+  index: ScheduleIndex,
 ): Record<string, FlightState> {
   const states: Record<string, FlightState> = {};
-  const connById = new Map(net.connections.map((c) => [c.id, c]));
+  const connById = index.connections;
 
   for (const rot of rotations) {
     let prevArr: Minutes | undefined;
@@ -256,9 +256,9 @@ function runRotations(
 }
 
 /** Causal depth: 0 = hit directly by a closure, n = n steps downstream. */
-function assignWaves(net: Network, states: Record<string, FlightState>): void {
+function assignWaves(index: ScheduleIndex, states: Record<string, FlightState>): void {
   const memo = new Map<string, number>();
-  const conn = new Map(net.connections.map((c) => [c.id, c]));
+  const conn = index.connections;
   const waveOf = (id: string, guard = 0): number => {
     if (memo.has(id)) return memo.get(id)!;
     const s = states[id];
@@ -295,145 +295,4 @@ function assignWaves(net: Network, states: Record<string, FlightState>): void {
     return w;
   };
   for (const id of Object.keys(states)) states[id].wave = waveOf(id);
-}
-
-function evaluateConnections(net: Network, states: Record<string, FlightState>): Record<string, ConnectionState> {
-  const out: Record<string, ConnectionState> = {};
-  for (const c of net.connections) {
-    const a = states[c.from];
-    const b = states[c.to];
-    const aCan = a.status === "cancelled";
-    const bCan = b.status === "cancelled";
-    if (aCan && bCan) out[c.id] = { id: c.id, made: false, reason: "both_cancelled", slack: 0 };
-    else if (aCan) out[c.id] = { id: c.id, made: false, reason: "inbound_cancelled", slack: 0 };
-    else if (bCan) out[c.id] = { id: c.id, made: false, reason: "onward_cancelled", slack: 0 };
-    else {
-      const slack = b.dep - a.arr - c.minConnect;
-      out[c.id] = { id: c.id, made: slack >= 0, reason: slack >= 0 ? "ok" : "too_short", slack };
-    }
-  }
-  return out;
-}
-
-function computeMetrics(
-  net: Network,
-  states: Record<string, FlightState>,
-  conns: Record<string, ConnectionState>,
-  actions: Action[],
-): Metrics {
-  const byId = new Map(net.flights.map((f) => [f.id, f]));
-  let late = 0;
-  let cancelled = 0;
-  let totalDelay = 0;
-  let paxDelay = 0;
-  let strandedOnCancelled = 0;
-  let delayedPax = 0;
-  let absorbed = 0;
-  const breachedCrews = new Set<string>();
-
-  for (const s of Object.values(states)) {
-    const f = byId.get(s.id)!;
-    absorbed += s.absorbed;
-    if (s.status === "cancelled") {
-      cancelled++;
-      strandedOnCancelled += f.pax;
-      if (s.cause?.kind === "crew_duty") breachedCrews.add(s.crew);
-    } else if (s.status === "late") {
-      late++;
-      totalDelay += s.delay;
-      paxDelay += s.delay * f.pax;
-      delayedPax += f.pax;
-    }
-  }
-
-  // Connecting passengers are already inside both flights' pax counts. Count each of them once,
-  // by what happens to them in the end: stranded passengers are not also delayed, and a passenger
-  // who completes a connection is judged on the arrival of their final flight only.
-  let bothCancelled = 0;
-  let brokenOperated = 0;
-  let broken = 0;
-  for (const c of net.connections) {
-    const st = conns[c.id];
-    const a = states[c.from];
-    const b = states[c.to];
-    const aLate = a.status === "late";
-    const bLate = b.status === "late";
-    const drop = (s: FlightState) => {
-      delayedPax -= c.passengers;
-      paxDelay -= c.passengers * s.delay;
-    };
-    if (!st.made) broken++;
-    switch (st.reason) {
-      case "ok": // reached the onward flight: only the final arrival counts
-        if (aLate) drop(a);
-        break;
-      case "too_short": // stranded at the connecting airport
-        brokenOperated += c.passengers;
-        if (aLate) drop(a);
-        if (bLate) drop(b);
-        break;
-      case "inbound_cancelled": // stranded at origin; not on the onward flight
-        if (bLate) drop(b);
-        break;
-      case "onward_cancelled": // stranded at the connecting airport
-        if (aLate) drop(a);
-        break;
-      case "both_cancelled":
-        bothCancelled += c.passengers;
-        break;
-    }
-  }
-  const stranded = strandedOnCancelled - bothCancelled + brokenOperated;
-
-  // Aircraft not at their planned overnight airport: each aircraft ends where its last flown leg landed.
-  const usedSpares = new Set(actions.filter((a) => a.kind === "swap").map((a) => (a as { spare: string }).spare));
-  const lastLeg = new Map<string, { at: Minutes; airport: string }>();
-  for (const s of Object.values(states)) {
-    if (s.status === "cancelled") continue;
-    const cur = lastLeg.get(s.tail);
-    if (!cur || s.arr > cur.at) lastLeg.set(s.tail, { at: s.arr, airport: byId.get(s.id)!.destination });
-  }
-  let outOfPosition = 0;
-  for (const [tail, legs] of groupByTail(net)) {
-    const end = lastLeg.get(tail)?.airport ?? legs[0].origin;
-    if (end !== legs[legs.length - 1].destination) outOfPosition++;
-  }
-  for (const s of net.spares) {
-    const end = lastLeg.get(s.tail)?.airport ?? s.base;
-    if (end !== s.base) outOfPosition++;
-  }
-  return {
-    lateFlights: late,
-    cancelledFlights: cancelled,
-    totalDelayMinutes: totalDelay,
-    paxDelayMinutes: paxDelay,
-    strandedPax: stranded,
-    delayedPax,
-    brokenConnections: broken,
-    crewBreaches: breachedCrews.size,
-    sparesUsed: usedSpares.size,
-    absorbedMinutes: absorbed,
-    outOfPosition,
-  };
-}
-
-/** True when no airport exceeds its hourly capacity in any rolling 60-minute window. */
-function checkCapacity(net: Network, states: Record<string, FlightState>): boolean {
-  const byId = new Map(net.flights.map((f) => [f.id, f]));
-  const moves = new Map<string, number[]>();
-  for (const s of Object.values(states)) {
-    if (s.status === "cancelled") continue;
-    const f = byId.get(s.id)!;
-    (moves.get(f.origin) ?? moves.set(f.origin, []).get(f.origin)!).push(s.dep);
-    (moves.get(f.destination) ?? moves.set(f.destination, []).get(f.destination)!).push(s.arr);
-  }
-  for (const a of net.airports) {
-    const t = (moves.get(a.id) ?? []).sort((x, y) => x - y);
-    let lo = 0;
-    for (let hi = 0; hi < t.length; hi++) {
-      while (t[hi] - t[lo] >= 60) lo++;
-      if (hi - lo + 1 > a.capacityPerHour) return false;
-    }
-  }
-  return true;
 }

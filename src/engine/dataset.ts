@@ -153,4 +153,23 @@ export function groupByTail(net: Network): Map<string, Network["flights"]> {
   return m;
 }
 
+/** Reuse the fixed timetable across every candidate in a recovery search. */
+export function indexSchedule(net: Network) {
+  const movements = new Map<string, number>();
+  for (const flight of net.flights) {
+    for (const airport of [flight.origin, flight.destination]) {
+      movements.set(airport, (movements.get(airport) ?? 0) + 1);
+    }
+  }
+  return {
+    flights: new Map(net.flights.map(f => [f.id, f])),
+    byTail: groupByTail(net),
+    crewByTail: new Map(net.crews.map(c => [c.tail, c])),
+    connections: new Map(net.connections.map(c => [c.id, c])),
+    // Delays and cancellations cannot increase the total number of movements at an airport.
+    capacityCannotBind: net.airports.every(a => (movements.get(a.id) ?? 0) <= a.capacityPerHour),
+  };
+}
+export type ScheduleIndex = ReturnType<typeof indexSchedule>;
+
 export const NETWORK: Network = loadNetwork(raw);

@@ -1,5 +1,5 @@
-import { groupByTail } from "./dataset";
-import { simulate } from "./simulate";
+import { indexSchedule } from "./dataset";
+import { MAX_HOLD_MIN, simulate } from "./simulate";
 import type { Action, Closure, Metrics, Network, SimResult } from "./types";
 
 // ---------- Action IDs (stable, built from content) ----------
@@ -30,9 +30,8 @@ export function parseActionId(id: string): Action | null {
 export type Feasibility = { ok: true } | { ok: false; reason: string };
 
 /** Check a plan for impossible or conflicting actions. Reasons are plain English for the UI and the AI. */
-export function checkPlan(net: Network, actions: Action[]): Feasibility {
-  const flights = new Map(net.flights.map((f) => [f.id, f]));
-  const byTail = groupByTail(net);
+export function checkPlan(net: Network, actions: Action[], index = indexSchedule(net)): Feasibility {
+  const { flights, byTail } = index;
   const usedSpares = new Set<string>();
   const swappedTails = new Map<string, number>(); // tail -> leg index taken over
   const cancelled = new Set<string>();
@@ -90,8 +89,8 @@ export function checkPlan(net: Network, actions: Action[]): Feasibility {
 // ---------- Candidates ----------
 
 /** Single actions worth trying after a closure: limited to aircraft and connections the closure touched. */
-export function candidateActions(net: Network, closures: Closure[], base: SimResult): Action[] {
-  const byTail = groupByTail(net);
+export function candidateActions(net: Network, closures: Closure[], base: SimResult, index = indexSchedule(net)): Action[] {
+  const { byTail } = index;
   const hit = (id: string) => base.flights[id].status !== "on_time";
   const out: Action[] = [];
 
@@ -118,7 +117,7 @@ export function candidateActions(net: Network, closures: Closure[], base: SimRes
   // Holds for connections the closure broke, when a short hold is enough.
   for (const c of net.connections) {
     const st = base.connections[c.id];
-    if (st.reason === "too_short" && -st.slack <= 60) out.push({ kind: "hold", connection: c.id });
+    if (st.reason === "too_short" && -st.slack <= MAX_HOLD_MIN) out.push({ kind: "hold", connection: c.id });
   }
   return out;
 }
@@ -181,6 +180,7 @@ export function planId(actions: Action[]): string {
 export interface RecoverySearch {
   base: SimResult;
   candidates: Action[];
+  singles: { action: Action; metrics: Metrics }[];
   evaluated: number;
   frontier: Plan[]; // non-dominated plans, sorted by the engine's default order
 }
@@ -190,33 +190,42 @@ export interface RecoverySearch {
  * Keep the plans no other plan beats on every measure.
  */
 export function searchRecovery(net: Network, closures: Closure[], fixed: Action[] = []): RecoverySearch {
-  const base = simulate(net, { closures, actions: fixed });
-  const cands = candidateActions(net, closures, base);
-  const plans: Plan[] = [{ id: planId([]), actions: [], metrics: base.metrics }];
-  const tryPlan = (acts: Action[]) => {
-    const all = [...fixed, ...acts];
-    if (!checkPlan(net, all).ok) return;
-    const r = simulate(net, { closures, actions: all });
-    plans.push({ id: planId(acts), actions: acts, metrics: r.metrics });
+  const index = indexSchedule(net);
+  const base = simulate(net, { closures, actions: fixed }, index);
+  const cands = candidateActions(net, closures, base, index);
+  let frontier: Plan[] = [{ id: "NONE", actions: [], metrics: base.metrics }];
+  let evaluated = 1;
+  const singlePlans: Plan[] = [];
+  const tryPlan = (actions: Action[]) => {
+    const all = [...fixed, ...actions];
+    if (!checkPlan(net, all, index).ok) return;
+    const { metrics } = simulate(net, { closures, actions: all }, index);
+    const plan = { id: planId(actions), actions, metrics };
+    evaluated++;
+    if (actions.length === 1) singlePlans.push(plan);
+    // A dominated plan cannot eliminate a plan that its dominator would keep.
+    if (frontier.some(other => dominates(other.metrics, metrics))) return;
+    const equal = frontier.findIndex(other => MEASURES.every(key => metrics[key] === other.metrics[key]));
+    if (equal >= 0) {
+      if (comparePlans("passengers")(plan, frontier[equal]) < 0) frontier[equal] = plan;
+      return;
+    }
+    frontier = frontier.filter(other => !dominates(metrics, other.metrics));
+    frontier.push(plan);
   };
   for (const a of cands) tryPlan([a]);
   for (let i = 0; i < cands.length; i++) for (let j = i + 1; j < cands.length; j++) tryPlan([cands[i], cands[j]]);
 
-  const singles = plans.filter((p) => p.actions.length === 1).sort(comparePlans("passengers")).slice(0, 10);
+  const singles = [...singlePlans].sort(comparePlans("passengers")).slice(0, 10);
   for (let i = 0; i < singles.length; i++)
     for (let j = i + 1; j < singles.length; j++)
       for (let k = j + 1; k < singles.length; k++) tryPlan([singles[i].actions[0], singles[j].actions[0], singles[k].actions[0]]);
 
-  // Remove duplicates (same id) then keep only non-dominated plans.
-  const unique = [...new Map(plans.map((p) => [p.id, p])).values()];
-  const frontier = unique.filter((p) => !unique.some((q) => q !== p && dominates(q.metrics, p.metrics)));
-  // Among plans with identical measures keep the one with fewest actions.
-  const byKey = new Map<string, Plan>();
-  for (const p of frontier.sort(comparePlans("passengers"))) {
-    const key = MEASURES.map((k) => p.metrics[k]).join("|");
-    if (!byKey.has(key)) byKey.set(key, p);
-  }
-  return { base, candidates: cands, evaluated: unique.length, frontier: [...byKey.values()].sort(comparePlans("passengers")) };
+  return {
+    base, candidates: cands, evaluated,
+    singles: singlePlans.map(plan => ({ action: plan.actions[0], metrics: plan.metrics })),
+    frontier: frontier.sort(comparePlans("passengers")),
+  };
 }
 
 export function pickPlan(frontier: Plan[], priority: Priority): Plan {

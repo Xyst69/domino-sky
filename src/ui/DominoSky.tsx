@@ -44,9 +44,9 @@ export function DominoSky() {
   const reduced = usePrefersReducedMotion();
 
   const { closures, applied } = state;
-  const base = useMemo(() => simulate(NETWORK, { closures, actions: [] }), [closures]);
-  const live = useMemo(() => simulate(NETWORK, { closures, actions: applied }), [closures, applied]);
   const search = useMemo(() => searchRecovery(NETWORK, closures), [closures]);
+  const base = search.base;
+  const live = useMemo(() => applied.length ? simulate(NETWORK, { closures, actions: applied }) : base, [closures, applied, base]);
   const chain = useMemo(() => (selected ? causeChain(NETWORK, live, closures, selected) : []), [selected, live, closures]);
   // The blue "cause path" is drawn only for a flight the storm actually affected.
   const pathFlights = useMemo(

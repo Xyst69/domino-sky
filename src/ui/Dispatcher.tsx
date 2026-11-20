@@ -88,15 +88,16 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
     const norm = normaliseClosures(closures);
     const planActs = resp.planActions.map((id) => parseActionId(id)!);
     const defActs = resp.defaultActions.map((id) => parseActionId(id)!);
+    const plan = simulate(NETWORK, { closures: norm, actions: planActs });
     const mine: Facts = buildFacts(
       NETWORK,
       norm,
-      { closure: simulate(NETWORK, { closures: norm, actions: [] }), plan: simulate(NETWORK, { closures: norm, actions: planActs }), default: simulate(NETWORK, { closures: norm, actions: defActs }) },
+      { closure: simulate(NETWORK, { closures: norm, actions: [] }), plan, default: samePlan(resp.planActions, resp.defaultActions) ? plan : simulate(NETWORK, { closures: norm, actions: defActs }) },
       NETWORK.flights.map((f) => f.id),
     );
     const keys = [...new Set(referencedKeys(resp.segments))];
     const mismatched = keys.filter((k) => !mine[k] || mine[k].value !== resp.facts[k]?.value);
-    return { checked: keys.length, mismatched };
+    return { checked: keys.length, mismatched, metrics: plan.metrics };
   }, [resp, closures, hash]);
 
   const ask = async () => {
@@ -130,14 +131,7 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
   const planActions = shown?.planActions.map((id) => parseActionId(id)!) ?? [];
   const isApplied = (acts: Action[]) => acts.length === applied.length && acts.every((a) => applied.some((b) => actionId(b) === actionId(a)));
 
-  const singles = useMemo(
-    () =>
-      search.candidates.map((a) => ({
-        action: a,
-        metrics: simulate(NETWORK, { closures, actions: [a] }).metrics,
-      })),
-    [search, closures],
-  );
+  const singles = search.singles;
 
   if (!closures.length)
     return (
@@ -188,7 +182,7 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
         {loading ? "Dispatcher is weighing the options…" : "Ask the dispatcher"}
       </button>
       <p className="hint" style={{ marginTop: 6 }}>
-        The engine tested {search.evaluated} plans. {search.frontier.length} of them are worth considering, because each is best on at least one measure. The AI
+        The engine tested {search.evaluated} plans. {search.frontier.length} of them are worth considering, because improving one of their measures requires a trade-off. The AI
         weighs them against your priority and note, and can test its own combinations.
       </p>
       {error ? (
@@ -217,7 +211,7 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
             <div className="plan-card chosen">
               <h4>Dispatcher's choice</h4>
               {planActions.length ? <ul>{planActions.map((a) => <li key={actionId(a)}>{describe(a)}</li>)}</ul> : <p style={{ margin: "0 0 6px" }}>Do nothing</p>}
-              <div className="nums">{summary(simulate(NETWORK, { closures, actions: planActions }).metrics)}</div>
+              <div className="nums">{verification && summary(verification.metrics)}</div>
             </div>
           </div>
           {shown.source === "ai" ? (
@@ -271,14 +265,14 @@ export function Dispatcher({ closures, base, live, search, applied, priority, on
             const id = actionId(action);
             const on = applied.some((b) => actionId(b) === id);
             const next = on ? applied.filter((b) => actionId(b) !== id) : [...applied, action];
-            const feasible = checkPlan(NETWORK, next).ok;
+            const feasibility = checkPlan(NETWORK, next);
             return (
               <li key={id} className="move">
                 <div>
                   {describe(action)}
                   <small>On its own: {summary(metrics)}</small>
                 </div>
-                <button className="btn btn-small" onClick={() => onApply(next)} disabled={!feasible} title={feasible ? undefined : checkPlan(NETWORK, next).ok ? "" : (checkPlan(NETWORK, next) as { reason: string }).reason}>
+                <button className="btn btn-small" onClick={() => onApply(next)} aria-label={`${on ? "Remove" : "Apply"}: ${describe(action)}`} disabled={!feasibility.ok} title={feasibility.ok ? undefined : feasibility.reason}>
                   {on ? "Remove" : "Apply"}
                 </button>
               </li>

@@ -7,7 +7,8 @@ const scenarios = [
 ];
 
 test("recovery search", async ({ bench }) => {
-  await bench("four presets and four simultaneous closures", () => {
+  const result = await bench("four presets and four simultaneous closures", () => {
     for (const closures of scenarios) searchRecovery(NETWORK, closures);
   }).run();
+  console.info(`Median search time for five scenarios: ${result.latency.p50.toFixed(1)} ms`);
 });

@@ -1,9 +1,9 @@
 ﻿// Server-only configuration and a small per-route, per-IP rate limit for the public AI routes.
 export const AI_CONFIG = {
-  apiKey: process.env.GEMINI_API_KEY,
-  model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
-  enabled: process.env.AI_ENABLED !== "false",
-  thinkingLevel: process.env.GEMINI_THINKING_LEVEL, // optional: MINIMAL, LOW, MEDIUM or HIGH
+  apiKey: process.env.GEMINI_API_KEY?.trim(),
+  model: process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite",
+  enabled: process.env.AI_ENABLED?.trim() !== "false",
+  thinkingLevel: process.env.GEMINI_THINKING_LEVEL?.trim(), // optional: MINIMAL, LOW, MEDIUM or HIGH
   timeoutMs: 22_000,
 };
 

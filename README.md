@@ -152,10 +152,9 @@ Chosen by scanning every airport and start time for real trade-offs; numbers are
 
 - Spares can only take flights leaving their own base; ferry flights are not modelled.
 - No diversions, no reserve crews, no rebooking onto later flights.
-- The live Gemini path is implemented against the `@google/genai` SDK's type definitions and is
-  tested with a scripted client (valid plan, repair, double failure, unknown actions, budget,
-  timeout, service error), but it has not been run against the live API in this repository (the
-  tests run without a key). See "Before a demo" above.
+- Gemini availability depends on the deployment credentials, model and quota. The automated suite
+  runs without a key and exercises valid plans, repairs, timeouts and provider failures with a scripted client.
+  The source badge on each live response identifies which dispatcher produced it.
 - Each AI route accepts up to 8 KiB of JSON and applies a rolling limit of 30 requests per
   client per minute within one server instance. The deployment proxy must set the forwarded
   client address. Limits reset when the instance restarts.
